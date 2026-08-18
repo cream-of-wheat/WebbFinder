@@ -335,7 +335,6 @@ class WebbFinderApp:
         for line in lines:
             text_surface = font.render(line.strip(), True, (255, 255, 255))
             self.screen.blit(text_surface, (text_box.x, line_pos))
-
             line_pos += line_height
 
     def draw_loading_screen(self):
