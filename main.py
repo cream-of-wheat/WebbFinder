@@ -2,6 +2,7 @@ import io
 import requests
 import webbrowser
 import json
+import threading
 import pygame
 
 
@@ -84,12 +85,15 @@ class WebbImage:
         self.description = self.data['Description']
         self.date = self.data['Date']
         self.url = self.data['ReferenceURL']
+        self.stored_image = None
 
-    def get_image(self):
-        image_url =  self.data["formats_url"]["screen640"]
-        image_bytes = requests.get(image_url).content
+    def get_image(self, session):
+        if not self.stored_image:
+            image_url =  self.data["formats_url"]["screen640"]
+            image_bytes = session.get(image_url).content
+            self.stored_image = image_bytes
 
-        return io.BytesIO(image_bytes)
+        return io.BytesIO(self.stored_image)
 
 
 
@@ -98,21 +102,100 @@ class Manager:
         self.images = []
         self.current_index = 0  # 0 is present day, increasing it goes into the past
         self.current_image = None
-        self.load_data('data.json')
+        self.session = requests.Session()
+        self.fetching_data = True
+        self.load_stored_data()
+        self.load_data()
         self.update_current_image()
 
-    def load_data(self, data_json):
-        with open(data_json, "r", encoding="utf-8") as f:
-            data = json.load(f)
+    def load_stored_data(self):
+        try:
+            with open("data.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
 
-            for image in data:
-                self.images.append(WebbImage(image))
+                for image in data:
+                    self.images.append(WebbImage(image))
+
+        except FileNotFoundError:
+            print("No data.json found. Downloading all info from the web. This WILL take a while (around 30-40 second per 100 images)")
+
+    def load_data(self):
+        thread = threading.Thread(target=self.download_data)
+        thread.start()
+
+    def download_data(self):
+        print("Checking for new images from the stars... (this might take a moment)")
+
+        existing_urls = {img.url for img in self.images} # each url is unique to each image, just a fast way to identify each image
+        new_images = [] # list of new images needed to be added. not just appended to the list because then it wouldnt be in chronological order
+        no_data = not self.images
+        fetching_data = True
+        current_page = 1
+
+        while fetching_data:
+            url = f"https://esawebb.org/images/json/page/{current_page}/?&sort=-release_date"
+
+            try:
+                response = self.session.get(url)
+
+                if response.status_code != 200:
+                    break
+
+                data = response.json()
+
+                last_image = False # boolean for if the latest image stored in the json has been reached (i.e., all caught up)
+
+                if not data:
+                    print("End of library of images :(")
+                    break
+
+                for image_info in data:
+                    ref_url = image_info.get("ReferenceURL")
+
+                    if ref_url in existing_urls:
+                        last_image = True
+                        break
+                    else:
+                        if no_data:
+                            if not self.images:
+                                self.images.append(WebbImage(image_info))
+                                self.update_current_image()
+                            else:
+                                self.images.append(WebbImage(image_info))
+
+                        new_images.append(WebbImage(image_info))
+
+                if last_image:
+                    print("All images found, everything is up to date")
+                    break
+
+                print(f"Page {current_page} has successfully been loaded")
+                current_page += 1
+
+            except requests.exceptions.RequestException as error:
+                print(f"Lost connection: {error}")
+                break
+
+        if new_images:
+            if not no_data:
+                self.images = new_images + self.images
+            self.current_index += len(new_images) # so the user stays on the same image they already are on
+            print("Saving data...")
+            self.save_data()
+            print("Saved! Your next session will open much quicker")
+
+    def save_data(self):
+        raw_data = [img.data for img in self.images]
+
+        with open("data.json", "w", encoding="utf-8") as f:
+            json.dump(raw_data, f, ensure_ascii=False, indent=4)
 
     def update_current_image(self):
-        self.current_image = self.images[self.current_index]
+        if self.images:
+            self.current_image = self.images[self.current_index]
 
     def get_image(self):
-        image = self.current_image.get_image()
+        image = self.current_image.get_image(self.session)
         return image
 
     def next_image(self):
@@ -255,24 +338,74 @@ class WebbFinderApp:
 
             line_pos += line_height
 
-        # 8 lines and then give link
+    def draw_loading_screen(self):
+        self.screen.fill((8, 8, 16))
+
+        font = pygame.font.SysFont(None, 48)
+        text_surf = font.render("Fetching images from the stars...", True, (200, 200, 200))
+        text_rect = text_surf.get_rect(center=(350, 200))
+        self.screen.blit(text_surf, text_rect)
+
+        current_time = pygame.time.get_ticks()
+        num_stars = (current_time // 500) % 4 # either 0, 1, 2 or 3 stars -> animation for waiting
+
+        for star in range(num_stars):
+            font = pygame.font.SysFont(None, 48 + 8 * star)
+            star_surf = font.render("*", True, (255, 255, 100))
+            x = 350 + star*80
+            y = 360 - star*40
+            star_rect = star_surf.get_rect(center=(x, y))
+            self.screen.blit(star_surf, star_rect)
+
+        center_x, center_y = 180, 480
+
+        pygame.draw.line(self.screen, (150, 150, 150), (center_x, center_y), (center_x - 30, center_y + 100), 5)
+        pygame.draw.line(self.screen, (150, 150, 150), (center_x, center_y), (center_x + 30, center_y + 100), 5)
+        pygame.draw.line(self.screen, (100, 100, 100), (center_x, center_y), (center_x, center_y + 100), 5)
+
+        pygame.draw.polygon(self.screen, (220, 220, 220), [
+            (center_x - 40, center_y + 20),
+            (center_x + 50, center_y - 20),
+            (center_x + 40, center_y - 40),
+            (center_x - 50, center_y)
+        ])
+        pygame.draw.circle(self.screen, (100, 150, 255), (center_x + 45, center_y - 30), 12)
+
+        pygame.display.flip()
 
     def run(self):
-        while self.running:
-            self.handle_events()
-            self.draw_buttons()
+        was_loading = not self.manager.images
 
-            self.draw()
+        while self.running:
+            if self.manager.images:
+                if was_loading:
+                    self.change_image()
+                    was_loading = False
+
+                self.handle_events()
+                self.draw_buttons()
+                self.draw()
+
+            else:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        self.running = False
+
+                self.draw_loading_screen()
 
     def change_image(self):
-        new_image = self.manager.get_image()
-        self.current_image = pygame.image.load(new_image)
+        if self.manager.images:
+            new_image = self.manager.get_image()
+            self.current_image = pygame.image.load(new_image)
 
-        self.title = self.manager.current_image.title
-        self.description = self.manager.current_image.description
-        self.date = self.manager.current_image.date
-        self.link = Url(f"More info at: {self.manager.current_image.url}",
-                        self.manager.current_image.url,(30, 530), )
+            self.title = self.manager.current_image.title
+            self.description = self.manager.current_image.description
+            self.date = self.manager.current_image.date
+            self.link = Url(f"More info at: {self.manager.current_image.url}",
+                            self.manager.current_image.url,(30, 530), )
+
+        else:
+            pass
 
 
 """
