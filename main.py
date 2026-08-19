@@ -133,7 +133,7 @@ class Manager:
         print("Checking for new images from the stars... (this might take a moment)")
 
         existing_urls = {img.url for img in self.images} # each url is unique to each image, just a fast way to identify each image
-        new_images = [] # list of new images needed to be added. not just appended to the list because then it wouldnt be in chronological order
+        new_images = [] # list of new images needed to be added. not just appended to the list because then it wouldn't be in chronological order
         no_data = not self.images
         fetching_data = True
         current_page = 1
@@ -296,6 +296,7 @@ class WebbFinderApp:
         pygame.init()
 
         self.screen = pygame.display.set_mode((700, 640)) # 700x640
+        pygame.display.set_caption("WebbFinder")
         self.clock = pygame.time.Clock()
         self.gui_manager = pygame_gui.UIManager((700, 640))
 
