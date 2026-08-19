@@ -188,7 +188,10 @@ class Manager:
             self.current_index += len(new_images) # so the user stays on the same image they already are on
             print("Saving data...")
             self.save_data()
-            print("Saved! Your next session will open much quicker")
+            print("Saved!")
+
+            if no_data:
+                print("Your next session will open much quicker")
 
     def save_data(self):
         raw_data = [img.data for img in self.images]
@@ -422,7 +425,12 @@ class WebbFinderApp:
     def draw_description(self):
         font = pygame.font.SysFont(None, 18)
 
-        text = self.description[2:-1].replace('\\xe2\\x80\\x99', "'").replace('\\xe2\\x80\\x9c', '"').replace('\\xe2\\x80\\x9d', '"')
+        text = (self.description[2:-1]
+                .replace('\\xe2\\x80\\x99', "'")
+                .replace('\\xe2\\x80\\x9c', '"')
+                .replace('\\xe2\\x80\\x9d', '"')
+                .replace('\\xc2\\xa0', ' ')
+                .replace('\\xe2\\x80\\x94', '—'))
         words = text.split(' ')
         lines = []
         current_line = ""
