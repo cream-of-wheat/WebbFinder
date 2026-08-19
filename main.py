@@ -3,6 +3,11 @@ import requests
 import webbrowser
 import json
 import threading
+import concurrent.futures
+import tkinter as tk
+from tkinter import filedialog
+from datetime import datetime
+import pygame_gui
 import pygame
 
 
@@ -103,6 +108,7 @@ class Manager:
         self.current_index = 0  # 0 is present day, increasing it goes into the past
         self.current_image = None
         self.session = requests.Session()
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
         self.fetching_data = True
         self.load_stored_data()
         self.load_data()
@@ -120,7 +126,7 @@ class Manager:
             print("No data.json found. Downloading all info from the web. This WILL take a while (around 30-40 second per 100 images)")
 
     def load_data(self):
-        thread = threading.Thread(target=self.download_data)
+        thread = threading.Thread(target=self.download_data, daemon=True)
         thread.start()
 
     def download_data(self):
@@ -190,9 +196,80 @@ class Manager:
         with open("data.json", "w", encoding="utf-8") as f:
             json.dump(raw_data, f, ensure_ascii=False, indent=4)
 
+    def preload_images(self):
+        start = max(0, self.current_index - 5)
+        end = min(len(self.images), self.current_index + 6)
+
+        for i in range(start, end):
+            image = self.images[i]
+
+            if not image.stored_image:
+                self.executor.submit(image.get_image, self.session)
+
+    def jump_to_date(self, year, month, day):
+        target_date = datetime(year, month, day)
+        closest_day = None
+        closest_day_difference = None
+
+
+        for image in self.images:
+            date = datetime.strptime(image.date[:10], "%Y-%m-%d")
+            days_apart = abs(target_date-date)
+
+            if not closest_day:
+                closest_day = image
+                closest_day_difference = days_apart
+
+            else:
+                if days_apart <= closest_day_difference:
+                    closest_day = image
+                    closest_day_difference = days_apart
+
+                else:
+                    break
+
+        self.current_index = self.images.index(closest_day)
+        self.update_current_image()
+
+        print(f'Closest image date to {str(target_date)[:10]} found on {self.current_image.date[:10]}: {self.current_image.title}')
+
+    def download_image(self, image_format):
+        root = tk.Tk()
+        root.withdraw()
+
+        image_url = self.current_image.data["formats_url"][image_format]
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".jpg",
+            title="Save space image as",
+            initialfile=f"{self.current_image.title.replace(' ', '_')}_{image_format}.jpg"
+        )
+
+        if file_path:
+            print(f"Downloading {image_format} resolution")
+
+            download_thread = threading.Thread(target=Manager.download_task(file_path, image_url), daemon=True)
+            download_thread.start()
+
+    @staticmethod
+    def download_task(file_path, url):
+        try:
+            response = requests.get(url, stream=True, timeout=15)
+            if response.status_code == 200:
+                with open(file_path, 'wb') as f:
+                    for chunk in response.iter_content(1024 * 1024):
+                        f.write(chunk)
+                print(f"Image saved to {file_path}")
+            else:
+                print("Failed to download image data")
+        except Exception as error:
+            print(f"Error while downloading: {error}")
+
     def update_current_image(self):
         if self.images:
             self.current_image = self.images[self.current_index]
+
+        self.preload_images()
 
     def get_image(self):
         image = self.current_image.get_image(self.session)
@@ -203,12 +280,14 @@ class Manager:
             self.current_index += 1
             self.update_current_image()
         else:
-            print("Images still loading, or have reached the end")
+            print("Images have reached the end")
 
     def previous_image(self):
         if self.current_index != 0:
             self.current_index -= 1
             self.update_current_image()
+        else:
+            print("Viewing latest image")
 
 
 class WebbFinderApp:
@@ -217,8 +296,23 @@ class WebbFinderApp:
         pygame.init()
 
         self.screen = pygame.display.set_mode((700, 640)) # 700x640
+        self.clock = pygame.time.Clock()
+        self.gui_manager = pygame_gui.UIManager((700, 640))
+
+        self.date_entry = pygame_gui.elements.UITextEntryLine(
+            relative_rect=pygame.Rect((300, 608), (98, 30)),
+            manager = self.gui_manager,
+            placeholder_text="YYYY-MM-DD"
+        )
+
+        self.download_dropdown = pygame_gui.elements.UIDropDownMenu(
+            options_list=["Download", "Medium", "Large", "Original"],
+            starting_option="Download",
+            relative_rect=pygame.Rect((500, 524), (120, 30)),
+            manager=self.gui_manager,
+        )
+
         self.running = True
-        self.need_redraw = True
         self.current_image = None
         self.title = None
         self.description = None
@@ -239,6 +333,18 @@ class WebbFinderApp:
             if event.type == pygame.QUIT:
                 self.running = False
 
+            self.gui_manager.process_events(event)
+
+            if event.type == pygame_gui.UI_TEXT_ENTRY_FINISHED:
+                if event.ui_element == self.date_entry:
+                    self.process_date_input(event.text)
+
+            if event.type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
+                if event.ui_element == self.download_dropdown:
+                    selected_format = event.text
+                    if selected_format != "Download":
+                        self.manager.download_image(selected_format.lower())
+
             if event.type == pygame.KEYUP:
                 if event.key == pygame.K_LEFT:
                     self.next_image()
@@ -256,21 +362,27 @@ class WebbFinderApp:
     def next_image(self):
         self.manager.next_image()
         self.change_image()
-        self.need_redraw = True
 
     def previous_image(self):
         self.manager.previous_image()
         self.change_image()
-        self.need_redraw = True
+
+    def process_date_input(self, date_string):
+        try:
+            date_components = date_string.split('-')
+            if len(date_components) == 3:
+                self.manager.jump_to_date(int(date_components[0]), int(date_components[1]), int(date_components[2]))
+                self.change_image()
+
+        except ValueError:
+            print("Format date as YYYY-MM-DD")
 
     def draw(self):
-        if self.need_redraw:
-            self.screen.fill((0,0,0))
-            pygame.draw.rect(self.screen, (40, 40, 40), (0, 0, 700, 640))
-            # pygame.draw.rect(self.screen, (60, 60, 60), (30, 410, 640, 130))
-            self.screen.blit(self.current_image, (30, 30))
-            self.draw_text()
-            self.need_redraw = False
+        self.screen.fill((0,0,0))
+        pygame.draw.rect(self.screen, (40, 40, 40), (0, 0, 700, 640))
+        # pygame.draw.rect(self.screen, (60, 60, 60), (30, 410, 640, 130))
+        self.screen.blit(self.current_image, (30, 30))
+        self.draw_text()
 
         pygame.draw.rect(self.screen, (0, 0, 0), (30, 560, 50, 50))
         pygame.draw.rect(self.screen, (0, 0, 0), (620, 560, 50, 50))
@@ -278,6 +390,7 @@ class WebbFinderApp:
 
         pygame.draw.rect(self.screen, (40, 40, 40), self.link.rect)
         self.link.draw(self.screen)
+        self.gui_manager.draw_ui(self.screen)
         pygame.display.flip()
 
     def draw_buttons(self):
@@ -286,18 +399,20 @@ class WebbFinderApp:
 
     def draw_text(self):
         font = pygame.font.SysFont(None, 24)
-
         text_surface = font.render(self.title, True, (255, 255, 255))
         text_rect = text_surface.get_rect()
-
         text_rect.center = (350, 580)
         self.screen.blit(text_surface, text_rect)
 
-        font = pygame.font.SysFont(None, 18)
+        font = pygame.font.SysFont(None, 20)
+        text_surface = font.render("Jump to image with closest date:", True, (255, 255, 255))
+        text_rect = text_surface.get_rect()
+        text_rect.center = (186, 624)
+        self.screen.blit(text_surface, text_rect)
 
+        font = pygame.font.SysFont(None, 18)
         text_surface = font.render(self.date, True, (255, 255, 255))
         text_rect = text_surface.get_rect()
-
         text_rect.center = (350, 600)
         self.screen.blit(text_surface, text_rect)
 
@@ -306,7 +421,7 @@ class WebbFinderApp:
     def draw_description(self):
         font = pygame.font.SysFont(None, 18)
 
-        text = self.description[2:-1]
+        text = self.description[2:-1].replace('\\xe2\\x80\\x99', "'").replace('\\xe2\\x80\\x9c', '"').replace('\\xe2\\x80\\x9d', '"')
         words = text.split(' ')
         lines = []
         current_line = ""
@@ -376,12 +491,15 @@ class WebbFinderApp:
         was_loading = not self.manager.images
 
         while self.running:
+            time_delta = self.clock.tick(60) / 1000.0
+
             if self.manager.images:
                 if was_loading:
                     self.change_image()
                     was_loading = False
 
                 self.handle_events()
+                self.gui_manager.update(time_delta)
                 self.draw_buttons()
                 self.draw()
 
@@ -405,13 +523,6 @@ class WebbFinderApp:
 
         else:
             pass
-
-
-"""
-url = "https://esawebb.org/images/json/page/1/?&sort=-release_date"
-response = requests.get(url)
-data = response.json()
-"""
 
 
 if __name__ == "__main__":
