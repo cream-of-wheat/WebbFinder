@@ -21,7 +21,7 @@ The app retrieves image metadata from the ESA/Webb API and displays the image al
 
 1. Clone the repository:
   ```bash
-  git clone [https://github.com/cream-of-wheat/WebbFinder.git](https://github.com/cream-of-wheat/WebbFinder.git)
+  git clone https://github.com/cream-of-wheat/WebbFinder.git
   cd WebbFinder
   ```
 2. Install the required dependencies:
