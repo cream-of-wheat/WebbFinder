@@ -34,7 +34,7 @@ The app retrieves image metadata from the ESA/Webb API and displays the image al
   ```bash
   python main.py
   ```
-   (Note: On the first launch, the app will build a local `data.json` cache of the image library, which may take a few moments. Subsequent launches will be much faster. If you wish to skip this, download the data.json file in the repository. Or enjoy the simple animation :D)
+  (Note: The repository includes a pre-built data.json cache, so the app will launch instantly. If you ever delete data.json, the app will automatically fetch the newest images from the API and rebuild the cache. Enjoy the animation if you do :D)
 
 ## Usage
 * Navigation: Click the '<' and '>' buttons or use the left/right arrow keys to cycle through the images
