@@ -251,7 +251,10 @@ class Manager:
         if file_path:
             print(f"Downloading {image_format} resolution")
 
-            download_thread = threading.Thread(target=Manager.download_task(file_path, image_url), daemon=True)
+            download_thread = threading.Thread(
+                target=Manager.download_task,
+                args=(file_path, image_url),
+                daemon=True)
             download_thread.start()
 
     @staticmethod
@@ -349,7 +352,7 @@ class WebbFinderApp:
                     if selected_format != "Download":
                         self.manager.download_image(selected_format.lower())
 
-            if event.type == pygame.KEYUP:
+            if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_LEFT:
                     self.next_image()
                 if event.key == pygame.K_RIGHT:
