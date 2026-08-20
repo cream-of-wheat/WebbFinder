@@ -2,6 +2,8 @@ import io
 import requests
 import webbrowser
 import json
+import os
+import sys
 import threading
 import concurrent.futures
 import tkinter as tk
@@ -110,13 +112,37 @@ class Manager:
         self.session = requests.Session()
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
         self.fetching_data = True
+        self.data_path = Manager.get_json_path()
         self.load_stored_data()
         self.load_data()
         self.update_current_image()
 
+    @staticmethod
+    def get_json_path():
+        filename = "data.json"
+
+        if getattr(sys, 'frozen', False):
+            directory = os.path.dirname(sys.executable)
+        else:
+            directory = os.path.dirname(os.path.abspath(__file__))
+
+        data_path = os.path.join(directory, filename)
+
+        if not os.path.exists(data_path):
+            if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+                bundle_dir = sys._MEIPASS
+                bundled_path = os.path.join(bundle_dir, filename)
+
+                with open(bundled_path, 'r', encoding="utf-8") as f:
+                    initial_data = json.load(f)
+                with open(data_path, 'w', encoding="utf-8") as f:
+                    json.dump(initial_data, f, ensure_ascii=False, indent=4)
+
+        return data_path
+
     def load_stored_data(self):
         try:
-            with open("data.json", "r", encoding="utf-8") as f:
+            with open(self.data_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
                 for image in data:
